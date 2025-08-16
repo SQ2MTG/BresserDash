@@ -1,7 +1,9 @@
+
 const DATA_URL = './wx.json';
 const HISTORY_URL = './history.json';
 const FETCH_INTERVAL = 5000;
 const CHART_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
+const LOCAL_STORAGE_KEY = 'weatherHistory';
 
 let charts = {};
 
@@ -199,35 +201,75 @@ function updateUI(data) {
     lucide.createIcons();
 }
 
-async function loadHistory() {
+function saveHistory() {
+    const historyToSave = {};
+    Object.keys(charts).forEach(key => {
+        const chart = charts[key];
+        historyToSave[key] = chart.data.datasets.map(dataset => dataset.data);
+    });
+
+    try {
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(historyToSave));
+    } catch (e) {
+        console.error('Failed to save history to localStorage.', e);
+    }
+}
+
+async function initializeHistory() {
+    let fileHistory = {};
     try {
         const response = await fetch(HISTORY_URL);
-        if (!response.ok) {
+        if (response.ok) {
+            fileHistory = await response.json();
+        } else {
             console.error(`Could not fetch ${HISTORY_URL}: ${response.statusText}`);
-            return;
         }
-        const storedHistory = await response.json();
-        const cutoffTime = Date.now() - CHART_WINDOW_MS;
-
-        Object.keys(storedHistory).forEach(key => {
-            if (charts[key]) {
-                const chart = charts[key];
-                const datasetsHistory = storedHistory[key]; 
-
-                if (!Array.isArray(datasetsHistory)) return;
-
-                datasetsHistory.forEach((datasetHistory, index) => {
-                    if (chart.data.datasets[index] && Array.isArray(datasetHistory)) {
-                        const filteredData = datasetHistory.filter(point => point && typeof point.x === 'number' && point.x >= cutoffTime);
-                        chart.data.datasets[index].data = filteredData;
-                    }
-                });
-                chart.update('quiet');
-            }
-        });
     } catch (e) {
         console.error(`Failed to load or parse history from ${HISTORY_URL}.`, e);
     }
+
+    let localHistory = {};
+    try {
+        const storedHistory = localStorage.getItem(LOCAL_STORAGE_KEY);
+        if (storedHistory) {
+            localHistory = JSON.parse(storedHistory);
+        }
+    } catch (e) {
+        console.error('Failed to parse history from localStorage.', e);
+    }
+
+    const cutoffTime = Date.now() - CHART_WINDOW_MS;
+
+    Object.keys(charts).forEach(key => {
+        const chart = charts[key];
+        const fileDatasets = fileHistory[key] || [];
+        const localDatasets = localHistory[key] || [];
+
+        chart.data.datasets.forEach((dataset, index) => {
+            const pointsMap = new Map();
+            
+            const addPointsToMap = (pointsArray) => {
+                if (Array.isArray(pointsArray)) {
+                    pointsArray.forEach(point => {
+                        if (point && typeof point.x === 'number' && typeof point.y === 'number') {
+                            pointsMap.set(point.x, point);
+                        }
+                    });
+                }
+            };
+            
+            if (fileDatasets[index]) addPointsToMap(fileDatasets[index]);
+            if (localDatasets[index]) addPointsToMap(localDatasets[index]);
+            
+            const mergedPoints = Array.from(pointsMap.values());
+            const sortedPoints = mergedPoints.sort((a, b) => a.x - b.x);
+            const filteredData = sortedPoints.filter(point => point.x >= cutoffTime);
+
+            dataset.data = filteredData;
+        });
+        
+        chart.update('quiet');
+    });
 }
 
 function updateCharts(data) {
@@ -282,6 +324,8 @@ function updateCharts(data) {
 
         chart.update('quiet');
     });
+    
+    saveHistory();
 }
 
 function showError(message) {
@@ -333,7 +377,7 @@ async function fetchData() {
 
 document.addEventListener('DOMContentLoaded', async () => {
     initializeCharts();
-    await loadHistory();
+    await initializeHistory();
     await fetchData();
     setInterval(fetchData, FETCH_INTERVAL);
 });

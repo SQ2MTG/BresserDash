@@ -1,0 +1,5 @@
+{
+  "name": "Bresser Weather Station Dashboard",
+  "description": "A web-based dashboard to graphically display real-time sensor readings from a Bresser 5-in-1 weather station, simulating data from an MQTT source on a LAN.",
+  "requestFramePermissions": []
+}

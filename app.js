@@ -1,6 +1,7 @@
 const DATA_URL = './wx.json';
 const FETCH_INTERVAL = 5000;
-const TWENTY_FOUR_HOURS_IN_MS = 24 * 60 * 60 * 1000;
+const STORAGE_KEY = 'weatherStationHistory';
+const DATA_RETENTION_MS = 25 * 60 * 60 * 1000; // 25 hours
 
 let charts = {};
 
@@ -197,6 +198,50 @@ function updateUI(data) {
     lucide.createIcons();
 }
 
+function saveHistory() {
+    const historyToSave = {};
+    Object.keys(charts).forEach(key => {
+        historyToSave[key] = charts[key].data.datasets.map(dataset => dataset.data);
+    });
+    try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(historyToSave));
+    } catch (e) {
+        console.error("Failed to save history to localStorage. Storage might be full.", e);
+    }
+}
+
+function loadHistory() {
+    const storedHistoryJSON = localStorage.getItem(STORAGE_KEY);
+    if (!storedHistoryJSON) {
+        return;
+    }
+
+    try {
+        const storedHistory = JSON.parse(storedHistoryJSON);
+        const cutoffTime = Date.now() - DATA_RETENTION_MS;
+
+        Object.keys(storedHistory).forEach(key => {
+            if (charts[key]) {
+                const chart = charts[key];
+                const datasetsHistory = storedHistory[key]; 
+
+                if (!Array.isArray(datasetsHistory)) return;
+
+                datasetsHistory.forEach((datasetHistory, index) => {
+                    if (chart.data.datasets[index] && Array.isArray(datasetHistory)) {
+                        const filteredData = datasetHistory.filter(point => point && typeof point.x === 'number' && point.x >= cutoffTime);
+                        chart.data.datasets[index].data = filteredData;
+                    }
+                });
+                chart.update('quiet');
+            }
+        });
+    } catch (e) {
+        console.error("Failed to load or parse history from localStorage. Clearing corrupted data.", e);
+        localStorage.removeItem(STORAGE_KEY);
+    }
+}
+
 function updateCharts(data) {
     const timestamp = new Date(data.time.replace(' ', 'T')).getTime();
 
@@ -219,20 +264,18 @@ function updateCharts(data) {
         ]
     };
 
-    const twentyFourHoursAgo = Date.now() - TWENTY_FOUR_HOURS_IN_MS;
+    const cutoffTime = Date.now() - DATA_RETENTION_MS;
 
     Object.keys(charts).forEach(key => {
         const chart = charts[key];
         const newData = chartDataPoints[key];
         
-        // Avoid adding duplicate data points
         const firstDataset = chart.data.datasets[0];
         const lastDataPoint = firstDataset.data[firstDataset.data.length - 1];
         if (lastDataPoint && lastDataPoint.x === timestamp) {
             return;
         }
 
-        // Add new data
         if (key === 'signal') {
             const [snrPoint, noisePoint] = newData;
             chart.data.datasets[0].data.push(snrPoint);
@@ -243,15 +286,16 @@ function updateCharts(data) {
             }
         }
         
-        // Remove old data from all datasets for the current chart
         chart.data.datasets.forEach(dataset => {
-            while (dataset.data.length > 0 && dataset.data[0].x < twentyFourHoursAgo) {
+            while (dataset.data.length > 0 && dataset.data[0].x < cutoffTime) {
                 dataset.data.shift();
             }
         });
 
         chart.update('quiet');
     });
+
+    saveHistory();
 }
 
 function showError(message) {
@@ -303,6 +347,7 @@ async function fetchData() {
 
 document.addEventListener('DOMContentLoaded', () => {
     initializeCharts();
+    loadHistory();
     fetchData();
     setInterval(fetchData, FETCH_INTERVAL);
 });

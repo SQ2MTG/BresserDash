@@ -1,5 +1,0 @@
-{
-  "name": "Weather Station Dashboard",
-  "description": "A real-time web dashboard that displays weather readings from a Bresser 6-in-1 weather station via a local JSON file. It visualizes data with numerical values and historical charts.",
-  "requestFramePermissions": []
-}

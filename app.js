@@ -1,7 +1,7 @@
 const DATA_URL = './wx.json';
+const HISTORY_URL = './history.json';
 const FETCH_INTERVAL = 5000;
-const STORAGE_KEY = 'weatherStationHistory';
-const DATA_RETENTION_MS = 25 * 60 * 60 * 1000; // 25 hours
+const CHART_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 let charts = {};
 
@@ -37,6 +37,7 @@ const chartDefaultOptions = {
             type: 'time',
             time: {
                 unit: 'hour',
+                stepSize: 1,
                 tooltipFormat: 'HH:mm:ss',
                 displayFormats: {
                    hour: 'HH:mm'
@@ -83,11 +84,11 @@ function createChart(ctx, label, color) {
 }
 
 function initializeCharts() {
-    charts.temperature = createChart(document.getElementById('temp-chart').getContext('2d'), 'Temperature (°C)', '#f87171');
-    charts.humidity = createChart(document.getElementById('hum-chart').getContext('2d'), 'Humidity (%)', '#38bdf8');
-    charts.wind = createChart(document.getElementById('wind-chart').getContext('2d'), 'Avg Wind (m/s)', '#94a3b8');
-    charts.rain = createChart(document.getElementById('rain-chart').getContext('2d'), 'Rainfall (mm)', '#60a5fa');
-    charts.dewPoint = createChart(document.getElementById('dew-point-chart').getContext('2d'), 'Dew Point (°C)', '#22d3ee');
+    charts.temperature = createChart(document.getElementById('temp-chart').getContext('2d'), 'Temperatura (°C)', '#f87171');
+    charts.humidity = createChart(document.getElementById('hum-chart').getContext('2d'), 'Wilgotność (%)', '#38bdf8');
+    charts.wind = createChart(document.getElementById('wind-chart').getContext('2d'), 'Śr. wiatr (m/s)', '#94a3b8');
+    charts.rain = createChart(document.getElementById('rain-chart').getContext('2d'), 'Opady (mm)', '#60a5fa');
+    charts.dewPoint = createChart(document.getElementById('dew-point-chart').getContext('2d'), 'Punkt Rosy (°C)', '#22d3ee');
 
     // Special multi-line chart for signal
     const signalCtx = document.getElementById('signal-chart').getContext('2d');
@@ -103,7 +104,7 @@ function initializeCharts() {
                 pointRadius: 0,
                 fill: true,
             }, {
-                label: 'Noise (dB)',
+                label: 'Szum (dB)',
                 data: [],
                 borderColor: '#94a3b8',
                 backgroundColor: '#94a3b833',
@@ -163,8 +164,8 @@ function updateUI(data) {
             <span class="absolute top-0 right-0 block h-2 w-2 rounded-full bg-green-500 ring-2 ring-slate-800 animate-pulse"></span>
         </div>
         <div>
-            <p class="text-sm font-medium text-slate-300">Live</p>
-            <p class="text-xs text-slate-400">Last updated: ${data.time.split(' ')[1]}</p>
+            <p class="text-sm font-medium text-slate-300">Na Żywo</p>
+            <p class="text-xs text-slate-400">Ostatnia akt.: ${data.time.split(' ')[1]}</p>
         </div>
     `;
 
@@ -174,7 +175,7 @@ function updateUI(data) {
         : `<i data-lucide="battery-warning" class="h-4 w-4 text-red-500"></i>`;
     const batteryStatus = data.battery_ok === 1 
         ? `<span class="font-semibold text-green-500">OK</span>`
-        : `<span class="font-semibold text-red-500">Low</span>`;
+        : `<span class="font-semibold text-red-500">Niski</span>`;
     
     elements.signalInfoContainer.innerHTML = `
         <div class="flex justify-between items-center text-sm">
@@ -186,11 +187,11 @@ function updateUI(data) {
             <span class="font-mono text-slate-200">${data.rssi.toFixed(2)} dBm</span>
         </div>
         <div class="flex justify-between items-center text-sm">
-            <div class="flex items-center space-x-2 text-slate-400"><i data-lucide="waves" class="h-4 w-4 text-slate-500"></i><span>Noise</span></div>
+            <div class="flex items-center space-x-2 text-slate-400"><i data-lucide="waves" class="h-4 w-4 text-slate-500"></i><span>Szum</span></div>
             <span class="font-mono text-slate-200">${data.noise.toFixed(2)} dB</span>
         </div>
         <div class="flex justify-between items-center text-sm">
-            <div class="flex items-center space-x-2 text-slate-400">${batteryIcon}<span>Battery</span></div>
+            <div class="flex items-center space-x-2 text-slate-400">${batteryIcon}<span>Bateria</span></div>
             ${batteryStatus}
         </div>
     `;
@@ -198,27 +199,15 @@ function updateUI(data) {
     lucide.createIcons();
 }
 
-function saveHistory() {
-    const historyToSave = {};
-    Object.keys(charts).forEach(key => {
-        historyToSave[key] = charts[key].data.datasets.map(dataset => dataset.data);
-    });
+async function loadHistory() {
     try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(historyToSave));
-    } catch (e) {
-        console.error("Failed to save history to localStorage. Storage might be full.", e);
-    }
-}
-
-function loadHistory() {
-    const storedHistoryJSON = localStorage.getItem(STORAGE_KEY);
-    if (!storedHistoryJSON) {
-        return;
-    }
-
-    try {
-        const storedHistory = JSON.parse(storedHistoryJSON);
-        const cutoffTime = Date.now() - DATA_RETENTION_MS;
+        const response = await fetch(HISTORY_URL);
+        if (!response.ok) {
+            console.error(`Could not fetch ${HISTORY_URL}: ${response.statusText}`);
+            return;
+        }
+        const storedHistory = await response.json();
+        const cutoffTime = Date.now() - CHART_WINDOW_MS;
 
         Object.keys(storedHistory).forEach(key => {
             if (charts[key]) {
@@ -237,8 +226,7 @@ function loadHistory() {
             }
         });
     } catch (e) {
-        console.error("Failed to load or parse history from localStorage. Clearing corrupted data.", e);
-        localStorage.removeItem(STORAGE_KEY);
+        console.error(`Failed to load or parse history from ${HISTORY_URL}.`, e);
     }
 }
 
@@ -264,7 +252,7 @@ function updateCharts(data) {
         ]
     };
 
-    const cutoffTime = Date.now() - DATA_RETENTION_MS;
+    const cutoffTime = Date.now() - CHART_WINDOW_MS;
 
     Object.keys(charts).forEach(key => {
         const chart = charts[key];
@@ -294,8 +282,6 @@ function updateCharts(data) {
 
         chart.update('quiet');
     });
-
-    saveHistory();
 }
 
 function showError(message) {
@@ -307,8 +293,8 @@ function showError(message) {
     elements.statusIndicator.innerHTML = `
         <div class="relative"><i data-lucide="wifi-off" class="h-6 w-6 text-red-500"></i></div>
         <div>
-            <p class="text-sm font-medium text-slate-300">Connection Issue</p>
-            <p class="text-xs text-slate-400">Awaiting data...</p>
+            <p class="text-sm font-medium text-slate-300">Problem z połączeniem</p>
+            <p class="text-xs text-slate-400">Oczekiwanie na dane...</p>
         </div>
     `;
     lucide.createIcons();
@@ -324,7 +310,7 @@ async function fetchData() {
     try {
         const response = await fetch(DATA_URL, { cache: 'no-cache' });
         if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            throw new Error(`Błąd HTTP! status: ${response.status}`);
         }
         const data = await response.json();
         
@@ -333,9 +319,9 @@ async function fetchData() {
         updateCharts(data);
 
     } catch (err) {
-        console.error(`Failed to fetch weather data from '${DATA_URL}':`, err);
-        const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred';
-        showError(`Failed to load data from ${DATA_URL}. Make sure the file is available locally. Error: ${errorMessage}`);
+        console.error(`Nie udało się pobrać danych pogodowych z '${DATA_URL}':`, err);
+        const errorMessage = err instanceof Error ? err.message : 'Wystąpił nieznany błąd';
+        showError(`Nie udało się załadować danych z ${DATA_URL}. Upewnij się, że plik jest dostępny. Błąd: ${errorMessage}`);
     } finally {
         if (!elements.appContent.classList.contains('hidden')) return;
 
@@ -345,9 +331,9 @@ async function fetchData() {
     }
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     initializeCharts();
-    loadHistory();
-    fetchData();
+    await loadHistory();
+    await fetchData();
     setInterval(fetchData, FETCH_INTERVAL);
 });
